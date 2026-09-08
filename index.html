@@ -776,7 +776,7 @@ function tryFinishQuestions(){
   const unanswered=[];
   answers.forEach((a,i)=>{ if(a===null) unanswered.push(i+1); });
   if(unanswered.length===0){
-    goToWritingTask();
+    finishTest();
     return;
   }
   const box=document.getElementById('finishConfirm');
@@ -788,7 +788,7 @@ function tryFinishQuestions(){
 
 function confirmFinishYes(){
   document.getElementById('finishConfirm').style.display='none';
-  goToWritingTask();
+  finishTest();
 }
 
 function confirmFinishNo(){
@@ -864,7 +864,7 @@ function finishTest(){
       <span class="scale-range">${l.min}–${l.max}</span>
     </div>`).join('');
 
-  goScreen('results');
+  showGroups(true);
 
   // Notify the academy that a test was completed (fire-and-forget, doesn't block the UI)
   const chosenImage=WRITING_IMAGES.find(i=>i.id===writingImageChoice);
