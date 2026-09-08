@@ -63,8 +63,11 @@ body::before{content:'';position:fixed;inset:0;background-image:radial-gradient(
 
 /* TEST SCREEN */
 .qnav-wrap{margin-bottom:16px}
+.qnav-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .qnav-toggle{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;background:var(--bg2);border:1.5px solid var(--border);border-radius:10px;font-family:inherit;font-size:13px;font-weight:600;color:var(--text);cursor:pointer;transition:all .18s}
 .qnav-toggle:hover{border-color:var(--blue-mid);color:var(--blue)}
+.qnav-finish-now{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;background:transparent;border:1.5px dashed var(--border2);border-radius:10px;font-family:inherit;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;transition:all .18s}
+.qnav-finish-now:hover{border-color:var(--amber);color:var(--amber);border-style:solid}
 .qnav-grid{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;padding:14px;background:var(--bg2);border:1.5px solid var(--border);border-radius:12px}
 .qnav-item{width:32px;height:32px;border-radius:8px;border:1.5px solid var(--border2);background:var(--bg3);color:var(--muted);font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;font-family:'DM Sans',sans-serif}
 .qnav-item:hover{border-color:var(--blue-mid);color:var(--blue)}
@@ -281,7 +284,10 @@ body::before{content:'';position:fixed;inset:0;background-image:radial-gradient(
 <!-- SCREEN: TEST -->
 <div class="screen test" id="scr-test">
   <div class="qnav-wrap">
-    <button class="qnav-toggle" id="qnavToggle" onclick="toggleQuestionNav()">📋 Усі питання <span id="qnavToggleIcon">▾</span></button>
+    <div class="qnav-toolbar">
+      <button class="qnav-toggle" id="qnavToggle" onclick="toggleQuestionNav()">📋 Усі питання <span id="qnavToggleIcon">▾</span></button>
+      <button class="qnav-finish-now" onclick="tryFinishQuestions()">Завершити тест зараз</button>
+    </div>
     <div class="qnav-grid" id="qnavGrid" style="display:none"></div>
   </div>
 
@@ -491,6 +497,51 @@ let GROUPS=[
   {id:'Група 5',level:'A2',schedule:'Пн, Чт · 10:00–11:00 (за київським часом)',teacher:'Оксана Іванова',start:'Дата уточнюється',n:0},
 ];
 const NOTIFY_EMAIL='business.eng.academy@gmail.com';
+
+// ── SHARED BOOKING BACKEND (Google Apps Script + Google Sheet) ──────────────
+// This is what makes group capacity REAL for every visitor at once — a plain
+// in-browser counter only updates for the person looking at their own screen.
+// Setup: see Code.gs (deployed alongside this file) for the 5-step Apps Script
+// setup, then paste the resulting Web App URL below.
+const GAS_BOOKING_ENDPOINT=''; // e.g. 'https://script.google.com/macros/s/AKfycb.../exec'
+
+// Fetches live seat counts for every group from the Sheet and merges them into
+// GROUPS[].n. Falls back silently (keeps whatever's already in GROUPS) if the
+// endpoint isn't configured yet or the request fails.
+async function syncGroupCounts(){
+  if(!GAS_BOOKING_ENDPOINT) return;
+  try{
+    const res=await fetch(GAS_BOOKING_ENDPOINT,{method:'GET'});
+    if(!res.ok) return;
+    const data=await res.json();
+    if(!data.ok || !data.counts) return;
+    GROUPS.forEach(g=>{
+      if(typeof data.counts[g.id]==='number') g.n=data.counts[g.id];
+    });
+  }catch(e){ /* keep local counts */ }
+}
+
+// Attempts to book a seat on the shared backend. Returns:
+//  {ok:true, count} on success — GROUPS[].n should be set to `count`.
+//  {ok:false, reason:'full'} if the group filled up (e.g. a race with someone else).
+//  {ok:false, reason:'unavailable'} if the backend isn't configured/reachable —
+//  the caller should fall back to the local-only + Formspree flow.
+async function bookSeatOnBackend(g, name){
+  if(!GAS_BOOKING_ENDPOINT) return {ok:false,reason:'unavailable'};
+  try{
+    const res=await fetch(GAS_BOOKING_ENDPOINT,{
+      method:'POST',
+      body:JSON.stringify({name,groupId:g.id,level:g.level,teacher:g.teacher,schedule:g.schedule,start:g.start})
+    });
+    if(!res.ok) return {ok:false,reason:'unavailable'};
+    const data=await res.json();
+    if(data.ok) return {ok:true,count:data.count};
+    if(data.reason==='full') return {ok:false,reason:'full',count:data.count};
+    return {ok:false,reason:'unavailable'};
+  }catch(e){
+    return {ok:false,reason:'unavailable'};
+  }
+}
 
 // Teacher profile pages + photos (photos embedded as base64 below)
 const TEACHER_PROFILES={
@@ -832,12 +883,16 @@ function finishTest(){
 }
 
 // ── GROUPS ────────────────────────────────────────────────────────────────
-function showGroups(matchOnly){
+async function showGroups(matchOnly){
   groupFilter=matchOnly?'match':'all';
   renderMatchBanner();
   renderGroupTabs();
   renderGroups();
   goScreen('groups');
+  // Pull real, shared seat counts (if the backend is configured) and re-render.
+  await syncGroupCounts();
+  renderMatchBanner();
+  renderGroups();
 }
 
 function renderMatchBanner(){
@@ -953,20 +1008,41 @@ async function submitBooking(){
   const btn=document.querySelector('.modal-submit');
   btn.disabled=true; btn.textContent='Бронюємо…';
 
-  const subject=`[SQUAD] Нове бронювання — ${g.id} (${g.level}) — ${name}`;
-  const bookFields={
-    "Ім'я та прізвище": name,
-    "Група": g.id,
-    "Рівень": g.level,
-    "Викладач": g.teacher,
-    "Розклад": g.schedule,
-    "Старт": g.start,
-    "Заповненість після бронювання": (g.n+1)+'/'+MAX_GROUP_SIZE
-  };
-  const notified=await sendNotification(subject,bookFields);
+  // Try the shared backend first — it enforces capacity for EVERY visitor at
+  // once (not just this browser) and sends the notification email itself.
+  const backendResult=await bookSeatOnBackend(g,name);
 
-  // Update capacity locally (in-memory for this session)
-  g.n=Math.min(MAX_GROUP_SIZE,g.n+1);
+  if(backendResult.reason==='full'){
+    g.n=typeof backendResult.count==='number'?backendResult.count:MAX_GROUP_SIZE;
+    document.getElementById('bookModalContent').innerHTML=`
+      <div class="modal-success">
+        <span class="modal-success-icon">😔</span>
+        <h3>На жаль, місць уже немає</h3>
+        <p>Поки ви заповнювали форму, групу <b>${g.id}</b> заброньували інші студенти. Оберіть, будь ласка, іншу групу.</p>
+        <button class="modal-submit" style="margin-top:18px" onclick="closeBookModal(); renderMatchBanner(); renderGroups();">Обрати іншу групу</button>
+      </div>`;
+    return;
+  }
+
+  let notified;
+  if(backendResult.ok){
+    g.n=backendResult.count;
+    notified=true;
+  } else {
+    // Backend not configured/reachable — fall back to local-only counting + Formspree.
+    const subject=`[SQUAD] Нове бронювання — ${g.id} (${g.level}) — ${name}`;
+    const bookFields={
+      "Ім'я та прізвище": name,
+      "Група": g.id,
+      "Рівень": g.level,
+      "Викладач": g.teacher,
+      "Розклад": g.schedule,
+      "Старт": g.start,
+      "Заповненість після бронювання": (g.n+1)+'/'+MAX_GROUP_SIZE
+    };
+    notified=await sendNotification(subject,bookFields);
+    g.n=Math.min(MAX_GROUP_SIZE,g.n+1);
+  }
 
   // Lock further bookings — one person can reserve only one seat in one group.
   hasBooked=true;
