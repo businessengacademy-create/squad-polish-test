@@ -348,8 +348,9 @@ body::before{content:'';position:fixed;inset:0;background-image:radial-gradient(
   </div>
 
   <div class="test-nav">
+    <button class="btn-ghost" onclick="skipWritingTask()">Пропустити це завдання</button>
     <div class="tnav-spacer"></div>
-    <button class="btn-primary" id="btnWritingSubmit" onclick="submitWriting()" disabled>Завершити тест →</button>
+    <button class="btn-primary" id="btnWritingSubmit" onclick="submitWriting()" disabled>Завершити письмове завдання →</button>
   </div>
 </div>
 
@@ -834,6 +835,10 @@ function submitWriting(){
   finishTest();
 }
 
+function skipWritingTask(){
+  finishTest();
+}
+
 function finishTest(){
   let score=0, grammarCorrect=0, readingCorrect=0;
   QUESTIONS.forEach((q,i)=>{
@@ -871,7 +876,7 @@ function finishTest(){
     "Граматика і лексика": grammarCorrect+'/40',
     "Розуміння тексту": readingCorrect+'/10',
     "Обрана картинка (письмо)": chosenImage?chosenImage.label:'—',
-    "Опис (текст студента)": writingTextValue.trim(),
+    "Опис (текст студента)": writingTextValue.trim()||'(завдання пропущено)',
     "Рубрика для оцінки письма": WRITING_RUBRIC_SUMMARY
   };
   const resultSubject=`[SQUAD] Результат тесту — ${studentName} — ${score}/50 (${testLevel.code})`;
